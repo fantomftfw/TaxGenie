@@ -4,11 +4,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+
+// Define API_BASE_URL using the same pattern
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 export default function AdminSettings() {
   const [apiKey, setApiKey] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
+  const { authState } = useAuth(); // Get authState to access the token
 
   // TODO: Add logic to fetch current key value if needed, maybe on load?
 
@@ -17,15 +22,22 @@ export default function AdminSettings() {
       toast({ title: "Error", description: "API Key cannot be empty.", variant: "destructive" });
       return;
     }
+    if (!authState.token) { // Check if user is authenticated
+         toast({ title: "Error", description: "Authentication required.", variant: "destructive" });
+         return;
+    }
+    
     setIsLoading(true);
     try {
-      const response = await fetch('/api/admin/settings', {
+      // Update fetch URL and add Authorization header
+      const response = await fetch(`${API_BASE_URL}/admin/settings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          // TODO: Add ADMIN authentication header here if implemented on backend
+          'Authorization': `Bearer ${authState.token}` // Add the token
         },
-        body: JSON.stringify({ key: 'geminiApiKey', value: apiKey }),
+        // The backend expects { settings: { key: value } }
+        body: JSON.stringify({ settings: { geminiApiKey: apiKey } })
       });
 
       const result = await response.json();
