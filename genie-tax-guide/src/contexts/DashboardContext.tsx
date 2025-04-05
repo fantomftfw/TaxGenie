@@ -1,5 +1,8 @@
-import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext'; // Import useAuth to get token
+
+// Define API_BASE_URL using the same pattern
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 // Define the shape of the data we want to share
 interface DashboardData {
@@ -47,70 +50,67 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({ children }
   const { authState } = useAuth(); // Get auth state for token and loading status
 
   // Fetch initial dashboard summary data when authenticated
-  useEffect(() => {
-    const fetchDashboardSummary = async () => {
-      if (!authState.token) { // Ensure token exists
-         console.log("DashboardProvider: No token, skipping summary fetch.");
-         setIsLoadingSummary(false);
-         // Reset data if user logs out?
-         setDashboardData({
-              estimatedAnnualGross: null, estimatedTaxOldRegime: null, estimatedTaxNewRegime: null,
-              estimatedTaxSavings: null, recommendedRegime: null, financialYear: null,
-              latestParsedSalaryData: null
-          });
-         return;
-      }
-      
-      console.log("DashboardProvider: Auth token found, fetching summary...");
-      setIsLoadingSummary(true);
-      setSummaryError(null);
-
-      try {
-        const response = await fetch('/api/dashboard-summary', {
-          headers: {
-            'Authorization': `Bearer ${authState.token}`,
-          },
-        });
-        
-        const result = await response.json();
-
-        if (!response.ok) {
-            throw new Error(result.error || 'Failed to fetch dashboard summary');
-        }
-
-        if (result.summary) {
-            console.log("DashboardProvider: Summary fetched successfully", result.summary);
-            updateDashboardData(result.summary); // Update state with fetched data
-        } else {
-            console.log("DashboardProvider: No summary data returned from backend.");
-             // Keep initial null state if no summary found
-             setDashboardData({
-                estimatedAnnualGross: null, estimatedTaxOldRegime: null, estimatedTaxNewRegime: null,
-                estimatedTaxSavings: null, recommendedRegime: null, financialYear: null,
-                latestParsedSalaryData: null
-            });
-        }
-
-      } catch (error: any) {
-        console.error("DashboardProvider: Error fetching summary:", error);
-        setSummaryError(error.message || 'Could not load dashboard data.');
-        // Reset data on error
-         setDashboardData({
-              estimatedAnnualGross: null, estimatedTaxOldRegime: null, estimatedTaxNewRegime: null,
-              estimatedTaxSavings: null, recommendedRegime: null, financialYear: null,
-              latestParsedSalaryData: null
-          });
-      } finally {
-        setIsLoadingSummary(false);
-      }
-    };
-
-    // Only fetch when auth is no longer loading AND token is present/absent
-    if (!authState.isLoading) {
-        fetchDashboardSummary();
+  const fetchSummary = useCallback(async () => {
+    if (!authState.token) {
+      // Don't fetch if not authenticated
+      setIsLoadingSummary(false);
+      setSummaryError("User not authenticated.");
+      return;
     }
 
-  }, [authState.token, authState.isLoading]); // Depend on token and auth loading state
+    setIsLoadingSummary(true);
+    setSummaryError(null);
+
+    try {
+      // Update fetch URL and add Authorization header
+      const response = await fetch(`${API_BASE_URL}/dashboard-summary`, {
+        headers: {
+          'Authorization': `Bearer ${authState.token}`,
+        },
+      });
+      
+      // Check for non-JSON responses before trying to parse
+      const contentType = response.headers.get("content-type");
+      if (!response.ok) {
+           // Try to get error message from JSON if possible, otherwise use status text
+           let errorMsg = `HTTP error! status: ${response.status} ${response.statusText}`;
+           if (contentType && contentType.indexOf("application/json") !== -1) {
+                try {
+                    const errorData = await response.json();
+                    errorMsg = errorData.error || errorMsg;
+                } catch (jsonError) {
+                    // Ignore JSON parse error if response wasn't JSON
+                }
+           }
+           throw new Error(errorMsg);
+      }
+      
+      // Ensure response is JSON before parsing
+      if (!contentType || contentType.indexOf("application/json") === -1) {
+          throw new Error(`Received non-JSON response from server. Content-Type: ${contentType}`);
+      }
+
+      const data = await response.json();
+      console.log("Received dashboard summary:", data);
+      setDashboardData(data.summary); // Backend wraps data in a 'summary' object
+
+    } catch (error: any) {
+      console.error("DashboardProvider: Error fetching summary:", error);
+      setSummaryError(error.message || "Failed to fetch dashboard summary.");
+      setDashboardData({
+        estimatedAnnualGross: null, estimatedTaxOldRegime: null, estimatedTaxNewRegime: null,
+        estimatedTaxSavings: null, recommendedRegime: null, financialYear: null,
+        latestParsedSalaryData: null
+      }); // Clear data on error
+    } finally {
+      setIsLoadingSummary(false);
+    }
+  }, [authState.token]); // Dependency on token
+
+  // Fetch summary when the provider mounts or token changes
+  useEffect(() => {
+    fetchSummary();
+  }, [fetchSummary]);
 
   const updateDashboardData = (newData: Partial<DashboardData>) => {
     setDashboardData(prevData => ({ ...prevData, ...newData }));
