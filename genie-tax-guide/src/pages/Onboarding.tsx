@@ -7,6 +7,9 @@ import { Check, ArrowRight, Upload, FileText, X } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 
+// Define API_BASE_URL using the same pattern as in AuthContext
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+
 export default function Onboarding() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -77,7 +80,7 @@ export default function Onboarding() {
     formData.append('document', selectedFile);
 
     try {
-       const response = await fetch('/api/documents/upload', {
+       const response = await fetch(`${API_BASE_URL}/documents/upload`, {
          method: 'POST',
          body: formData,
          headers: {
