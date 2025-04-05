@@ -84,16 +84,18 @@ const authenticateToken = (req, res, next) => {
 const authorizeAdmin = (req, res, next) => {
   const userId = req.user.id; // Assumes authenticateToken ran first
 
-  const sql = "SELECT role FROM users WHERE id = ?";
+  // MVP Workaround: Check email instead of a non-existent 'role' column
+  const sql = "SELECT email FROM users WHERE id = ?"; 
   db.get(sql, [userId], (err, user) => {
     if (err) {
         console.error("DB Select error (admin check):", err);
-        return res.status(500).json({ "error": "Error checking user role" });
+        return res.status(500).json({ "error": "Error checking user permission" }); // Generic error
     }
-    // Check if user exists and has the 'admin' role
-    if (user && user.role === 'admin') {
+    // Check if user exists and email matches the hardcoded admin email
+    if (user && user.email === 'samefantom@gmail.com') {
         next(); // User is admin, proceed to the route handler
     } else {
+        console.warn(`Admin access denied for user ID: ${userId}, Email: ${user?.email}`);
         res.status(403).json({ "error": "Forbidden: Requires admin privileges" }); // Not an admin
     }
   });
