@@ -37,6 +37,9 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: function (origin, callback) {
+    // Log the origin header received by the server
+    console.log(`CORS Check: Received origin: ${origin}`); 
+
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     // Allow all origins in non-production environments
@@ -47,6 +50,7 @@ const corsOptions = {
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true)
     } else {
+      console.error(`CORS Error: Origin "${origin}" not in allowed list:`, allowedOrigins); // Log the error case too
       callback(new Error('Not allowed by CORS'))
     }
   },
