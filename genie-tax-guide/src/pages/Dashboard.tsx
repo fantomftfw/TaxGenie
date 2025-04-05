@@ -4,7 +4,7 @@ import { TaxSavingCard } from "@/components/TaxSavingCard";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { ArrowRight, FileText, PlusCircle } from "lucide-react";
+import { ArrowRight, FileText, PlusCircle, Upload } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useState } from "react";
@@ -12,6 +12,7 @@ import { SalaryBreakdownModal } from "@/components/SalaryBreakdownModal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
+import { useNavigate } from 'react-router-dom';
 
 // Helper function to format currency
 const formatCurrency = (value: number | null | undefined) => {
@@ -20,31 +21,10 @@ const formatCurrency = (value: number | null | undefined) => {
 };
 
 export default function Dashboard() {
-  // Mock data
   const currentUser = { name: "Jay" };
-  // Get shared data and loading/error states from context
   const { dashboardData, isLoadingSummary, summaryError } = useDashboard();
-  const { 
-      estimatedAnnualGross,
-      estimatedTaxOldRegime,
-      estimatedTaxNewRegime,
-      estimatedTaxSavings,
-      recommendedRegime,
-      financialYear 
-  } = dashboardData;
-
-  // State for salary breakdown modal
+  const navigate = useNavigate();
   const [isBreakdownModalOpen, setIsBreakdownModalOpen] = useState(false);
-  // We assume dashboardData holds the latest relevant parsed data for now
-  // Use the specific state holding the full breakdown data
-  const salaryBreakdownData = dashboardData.latestParsedSalaryData; 
-
-  // Determine which tax liability to display (e.g., the recommended one, or new regime default)
-  const displayedTaxLiability = recommendedRegime === 'old' ? estimatedTaxOldRegime : estimatedTaxNewRegime;
-  const potentialSavings = recommendedRegime === 'old' 
-      ? (estimatedTaxOldRegime ?? 0) - (estimatedTaxNewRegime ?? 0) 
-      : (estimatedTaxNewRegime ?? 0) - (estimatedTaxOldRegime ?? 0);
-      // Note: savings calculation might need refinement based on definition
 
   // Loading State UI
   if (isLoadingSummary) {
@@ -81,7 +61,51 @@ export default function Dashboard() {
       )
   }
 
-  // Normal Display (Data loaded without error)
+  // Empty State UI
+  if (!dashboardData) {
+      return (
+           <DashboardLayout>
+               <div className="mb-8">
+                   <h1 className="text-2xl font-semibold mb-1">Welcome back, {currentUser.name}!</h1>
+                   <p className="text-muted-foreground">Let's get started with your tax overview.</p>
+               </div>
+               <Card className="py-12 text-center border-dashed">
+                 <div className="flex flex-col items-center gap-3">
+                   <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+                     <FileText className="h-8 w-8 text-primary" />
+                   </div>
+                   <h3 className="text-lg font-medium mt-4">Upload Your First Document</h3>
+                   <p className="text-sm text-muted-foreground max-w-md mx-auto">
+                     To see your personalized tax dashboard, upload your Form 16 or a recent salary slip.
+                     We'll automatically extract the details.
+                   </p>
+                   <Button className="mt-6 gap-2" onClick={() => navigate('/documents')}>
+                     <Upload className="h-4 w-4" />
+                     Upload Document
+                   </Button>
+                 </div>
+               </Card>
+           </DashboardLayout>
+      )
+  }
+
+  // Only destructure and calculate if dashboardData is NOT null
+  const { 
+      estimatedAnnualGross,
+      estimatedTaxOldRegime,
+      estimatedTaxNewRegime,
+      estimatedTaxSavings,
+      recommendedRegime,
+      financialYear,
+      latestParsedSalaryData
+  } = dashboardData;
+
+  // Determine which tax liability to display (e.g., the recommended one, or new regime default)
+  const displayedTaxLiability = recommendedRegime === 'old' ? estimatedTaxOldRegime : estimatedTaxNewRegime;
+  const potentialSavings = estimatedTaxSavings; // Use directly from data if available
+  const salaryBreakdownData = latestParsedSalaryData; // Assign directly
+
+  // Normal Display (Data loaded without error AND data exists)
   return (
     <DashboardLayout>
       <div className="mb-8">
