@@ -31,7 +31,7 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Use environment variable for production, fallback to relative path for local dev proxy
+// Restore environment variable usage
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 export const useAuth = () => {

@@ -39,18 +39,22 @@ const corsOptions = {
   origin: function (origin, callback) {
     // Log the origin header received by the server
     console.log(`CORS Check: Received origin: ${origin}`); 
+    
+    // Trim the received origin just in case
+    const trimmedOrigin = origin ? origin.trim() : undefined;
 
     // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
+    if (!trimmedOrigin) return callback(null, true);
     // Allow all origins in non-production environments
     if (process.env.NODE_ENV !== 'production') {
         return callback(null, true);
     }    
     // Allow specified origins in production
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    // Use trimmedOrigin for the check
+    if (allowedOrigins.indexOf(trimmedOrigin) !== -1) {
       callback(null, true)
     } else {
-      console.error(`CORS Error: Origin "${origin}" not in allowed list:`, allowedOrigins); // Log the error case too
+      console.error(`CORS Error: Origin "${trimmedOrigin}" not in allowed list:`, allowedOrigins); // Log the error case too
       callback(new Error('Not allowed by CORS'))
     }
   },
