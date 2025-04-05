@@ -31,9 +31,8 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Define API base URL (could be env variable)
-// Use relative paths now, letting Vite proxy handle it
-const API_BASE_URL = '/api';
+// Use environment variable for production, fallback to relative path for local dev proxy
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
