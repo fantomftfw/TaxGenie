@@ -23,6 +23,9 @@ interface UserDocument {
   parseError?: string;
 }
 
+// Define API_BASE_URL using the same pattern
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+
 export default function Documents() {
   const [documents, setDocuments] = useState<UserDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,7 +93,7 @@ export default function Documents() {
     formData.append('document', file);
 
     try {
-       const response = await fetch('/api/documents/upload', {
+       const response = await fetch(`${API_BASE_URL}/documents/upload`, {
          method: 'POST',
          body: formData,
          headers: {
