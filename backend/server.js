@@ -32,7 +32,7 @@ const upload = multer({
 // Configure CORS
 const allowedOrigins = [
   'http://localhost:8080', // Your Vite dev server
-  'https://67f1748667495d47aff970e8--rad-llama-90904c.netlify.app' // Your deployed frontend
+  'https://67f1748667495d47aff970e8--rad-llama-90904c.netlify.app' // Ensure this matches EXACTLY
 ];
 
 const corsOptions = {
