@@ -15,6 +15,10 @@ import {
 import { ArrowRight, Loader2 } from "lucide-react";
 import { RegimeComparison } from "@/components/RegimeComparison";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useAuth } from "@/contexts/AuthContext";
+
+// Define API_BASE_URL using the same pattern
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 // Interface for the expected backend response structure (adjust as needed)
 interface CalculationResult {
@@ -60,6 +64,7 @@ export default function Calculator() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const { authState } = useAuth(); // Get authState
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
@@ -97,23 +102,36 @@ export default function Calculator() {
     console.log("Sending data to backend:", formData); // Log data being sent
 
     try {
-      const response = await fetch('http://localhost:3001/api/calculate-tax', {
+      // Update fetch URL and add Authorization header (even if backend doesn't check yet)
+      const response = await fetch(`${API_BASE_URL}/calculate-tax`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            // Include token if available
+            ...(authState.token && { 'Authorization': `Bearer ${authState.token}` }),
           },
           body: JSON.stringify(formData),
         });
 
+      // Add better error handling and content-type check
+      const contentType = response.headers.get("content-type");
+      if (!response.ok) {
+          let errorMsg = `HTTP error! status: ${response.status} ${response.statusText}`;
+          if (contentType && contentType.indexOf("application/json") !== -1) {
+              try {
+                  const errorData = await response.json();
+                  errorMsg = errorData.message || errorData.error || errorMsg;
+              } catch (jsonError) { /* Ignore */ }
+          }
+          throw new Error(errorMsg);
+      }
+      if (!contentType || contentType.indexOf("application/json") === -1) {
+          throw new Error(`Received non-JSON response from server. Content-Type: ${contentType}`);
+      }
+
       const result = await response.json();
       console.log("Received response from backend:", result); // Log received data
 
-      if (!response.ok) {
-        // Throw error with message from backend if available, else generic message
-        throw new Error(result.message || `HTTP error! status: ${response.status}`);
-      }
-
-      // Assuming backend returns data structure like { message: "...", calculatedTaxDetails: {...} }
       if (result.calculatedTaxDetails) {
          setCalculationResult(result.calculatedTaxDetails);
          setActiveTab("result"); // Move to result tab on success

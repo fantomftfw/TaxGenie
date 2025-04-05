@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -36,45 +36,52 @@ export default function Documents() {
   const isMobile = useIsMobile();
   const { updateDashboardData } = useDashboard();
   
-  const fetchDocuments = async () => {
+  const fetchDocuments = useCallback(async () => {
     if (!authState.token) {
-      setError("Authentication error - cannot fetch documents.");
+      setError("Authentication token not found.");
       setLoading(false);
       return;
     }
+    
     setLoading(true);
     setError(null);
+    
     try {
-      const response = await fetch('/api/documents', {
+      const response = await fetch(`${API_BASE_URL}/documents`, {
         headers: {
           'Authorization': `Bearer ${authState.token}`,
         }
       });
+
+      const contentType = response.headers.get("content-type");
       if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || `Failed to fetch documents: ${response.statusText}`);
+        let errorMsg = `HTTP error! status: ${response.status} ${response.statusText}`;
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+          try {
+            const errorData = await response.json();
+            errorMsg = errorData.error || errorMsg;
+          } catch (jsonError) { /* Ignore */ }
+        }
+        throw new Error(errorMsg);
       }
+      if (!contentType || contentType.indexOf("application/json") === -1) {
+        throw new Error(`Received non-JSON response from server. Content-Type: ${contentType}`);
+      }
+
       const data = await response.json();
-      console.log("Fetched documents:", data.documents);
       setDocuments(data.documents || []);
-    } catch (err: any) {
-      console.error("Error fetching documents:", err);
-      setError(err.message || "Failed to load documents.");
-      setDocuments([]); // Clear documents on error
+    } catch (error: any) {
+      console.error("Error fetching documents:", error);
+      setError(error.message || "Failed to load documents.");
+      setDocuments([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [authState.token]);
 
   useEffect(() => {
-    if (authState.token) {
-      fetchDocuments();
-    }
-    if (!authState.isLoading && !authState.token) {
-      setDocuments([]);
-      setLoading(false);
-    }
-  }, [authState.token, authState.isLoading]);
+    fetchDocuments();
+  }, [fetchDocuments]);
   
   const handleFileUpload = async (file: File) => {
     if (!authState.token) {
