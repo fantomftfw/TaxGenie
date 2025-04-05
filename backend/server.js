@@ -324,7 +324,7 @@ app.get("/api/documents", authenticateToken, (req, res) => {
 
 // --- Document Upload Endpoint (Updated for Gemini) ---
 app.post("/api/documents/upload", authenticateToken, upload.single('document'), async (req, res) => {
-    const userId = req.user.id; // Get user ID from authenticated token
+    const userId = req.user.id; 
     const file = req.file;
     console.log(`Received upload request for user ID: ${userId}, filename: ${file?.originalname}`);
 
@@ -332,6 +332,14 @@ app.post("/api/documents/upload", authenticateToken, upload.single('document'), 
         return res.status(400).json({ error: "No file uploaded or file type not allowed." });
     }
 
+    // TEMPORARY: Hardcode API Key - REMOVE FOR PRODUCTION / USE ENV VAR
+    const apiKey = "AIzaSyB2TUPrXR8qQNcLselSNq8twBklnCU40a4"; 
+    if (!apiKey) { // Keep basic check in case hardcoded value is removed
+         console.error("CRITICAL: Gemini API Key is not set!");
+         return res.status(500).json({ error: "API Key configuration error." });
+    }
+    /* 
+    // Original code to fetch from DB - commented out
     let apiKey;
     try {
         apiKey = await getGeminiApiKey();
@@ -341,6 +349,7 @@ app.post("/api/documents/upload", authenticateToken, upload.single('document'), 
     } catch (dbError) {
         return res.status(500).json({ error: "Failed to retrieve API key from database." });
     }
+    */
 
     try {
         // Initialize Google AI Client
@@ -510,8 +519,8 @@ app.post("/api/documents/upload", authenticateToken, upload.single('document'), 
         }
 
     } catch (error) {
-        console.error("Error during Gemini processing or file handling:", error);
-        res.status(500).json({ error: "Failed to process file with AI.", details: error.message });
+        console.error("Error during file processing or AI call:", error);
+        res.status(500).json({ error: "Failed to process document." });
     }
 });
 
