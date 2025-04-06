@@ -605,7 +605,7 @@ export default function Calculator() {
       </main>
       
        {/* --- Mobile Sticky Footer Bar --- */}
-        <div className="sticky bottom-0 left-0 right-0 z-40 border-t bg-background/95 p-4 md:hidden">
+        <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-background/95 p-4 md:hidden">
             {/* Container to keep buttons centered */}
              <div className="container mx-auto flex items-center justify-between gap-4">
                  {/* Conditional Back Button */}
