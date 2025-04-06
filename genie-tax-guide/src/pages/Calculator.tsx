@@ -121,56 +121,59 @@ export default function Calculator() {
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
     setIsUploading(true);
     setUploadError(null);
     setFileName(file.name);
-    setParsedData(null); 
-
+    setParsedData(null);
     const uploadFormData = new FormData();
-    uploadFormData.append('file', file);
-
+    uploadFormData.append('file', file); // Ensure field name matches multer: 'file'
     try {
-      const response = await fetch(`${API_BASE_URL}/parse-income-document`, {
-        method: 'POST',
-        body: uploadFormData,
+      const response = await fetch(`${API_BASE_URL}/parse-income-document`, { 
+          method: 'POST', 
+          body: uploadFormData 
       });
 
       if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(errorData || `Upload failed: ${response.status}`);
+        let errorMsg = `Upload failed: ${response.status}`;
+        let detailedError = ''; // Variable to hold the detailed error text
+        try {
+            detailedError = await response.text(); // Get raw text first
+            try {
+                const jsonData = JSON.parse(detailedError); // Try parsing the detailed error
+                errorMsg = jsonData.error || jsonData.message || errorMsg; // Use JSON error if available
+            } catch (jsonErr) {
+                errorMsg = detailedError || errorMsg; // Use text error if not JSON
+            }
+        } catch (readErr) { /* Ignore if reading text fails */ }
+        // Throw the potentially improved error message
+        throw new Error(errorMsg);
       }
 
       const result: ParsedIncomeData = await response.json();
-      console.log("Parsed Data:", result);
       setParsedData(result);
-
-      // Prefill form data - convert potential numbers to strings for input values
       setFormData(prev => ({
           ...prev,
           basic: String(result.basic ?? prev.basic ?? ""),
           hra: String(result.hra ?? prev.hra ?? ""),
           special: String(result.special ?? prev.special ?? ""),
           lta: String(result.lta ?? prev.lta ?? ""),
-          otherIncome: String(result.otherIncome ?? prev.otherIncome ?? ""),
+          otherIncome: String(result.otherIncome ?? prev.otherIncome ?? ""), // Ensure backend provides this if needed
           epfContribution: String(result.epfContribution ?? prev.epfContribution ?? ""),
           professionalTax: String(result.professionalTax ?? prev.professionalTax ?? ""),
-          // Auto-fill 80C EPF if available from parsed data
-          deduction80C_epf: String(result.epfContribution ?? prev.deduction80C_epf ?? ""),
-          // Add other prefill fields as necessary
+          deduction80C_epf: String(result.epfContribution ?? prev.deduction80C_epf ?? ""), // Auto-fill 80C
       }));
-
       setUploadError(null);
       setIsUploadModalOpen(false);
 
     } catch (err: any) {
-      console.error("File Upload/Parse failed:", err);
-      setUploadError(err.message || 'Failed to upload or parse document.');
-      setFileName(null);
-      setParsedData(null);
+        console.error("File Upload/Parse failed:", err);
+        setUploadError(err.message || 'Failed to upload or parse document.');
+        setFileName(null); // Clear file name on error
+        setParsedData(null);
+        // Keep modal open on error? Or close?
     } finally {
-      setIsUploading(false);
-      event.target.value = '';
+        setIsUploading(false);
+        event.target.value = ''; // Reset file input
     }
   };
 
