@@ -33,44 +33,27 @@ const upload = multer({
 // --- Middleware ---
 // Configure CORS
 const allowedOrigins = [
-  'http://localhost:8080', // Your Vite dev server
-  'https://rad-llama-90904c.netlify.app', // Example - Keep if needed?
-  'YOUR_NETLIFY_SITE_URL' // <-- Replace this placeholder
+  'http://localhost:8080', // Keep for local dev
+  'https://taxgenny.netlify.app' // Add your actual deployed Netlify URL
 ];
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Log the origin header received by the server
     console.log(`CORS Check: Received origin: ${origin}`); 
-    
-    // Trim the received origin just in case
     const trimmedOrigin = origin ? origin.trim() : undefined;
-
-    // Allow requests with no origin (like mobile apps or curl requests)
     if (!trimmedOrigin) return callback(null, true);
-    // Allow all origins in non-production environments
-    if (process.env.NODE_ENV !== 'production') {
-        return callback(null, true);
-    }    
-    // Allow specified origins in production
-    // Use trimmedOrigin for the check
-    const isAllowed = allowedOrigins.some(allowed => 
-        trimmedOrigin === allowed || 
-        // Add wildcard support for Netlify deploy previews (optional)
-        (allowed.includes('YOUR_NETLIFY_SITE_URL') && 
-         trimmedOrigin && 
-         trimmedOrigin.endsWith('.netlify.app') && 
-         trimmedOrigin.startsWith('https://deploy-preview-'))
-    );
+    // Simplified check: Allow if origin is in the list OR if it's a Netlify preview deploy
+    const isNetlifyPreview = trimmedOrigin.includes('.netlify.app') && trimmedOrigin.includes('deploy-preview');
+    const isAllowed = allowedOrigins.some(allowed => trimmedOrigin === allowed) || isNetlifyPreview;
 
-    if (!trimmedOrigin || isAllowed) {
+    if (isAllowed) {
         callback(null, true)
     } else {
         console.error(`CORS Error: Origin "${trimmedOrigin}" not in allowed list:`, allowedOrigins);
         callback(new Error('Not allowed by CORS'))
     }
   },
-  optionsSuccessStatus: 200 // some legacy browsers (IE11, various SmartTVs) choke on 204
+  optionsSuccessStatus: 200
 };
 
 app.use(cors(corsOptions));
