@@ -128,7 +128,7 @@ export default function Calculator() {
     const uploadFormData = new FormData();
     uploadFormData.append('file', file); // Ensure field name matches multer: 'file'
     try {
-      const response = await fetch(`${API_BASE_URL}/parse-income-document`, { 
+      const response = await fetch(`${API_BASE_URL}/api/parse-income-document`, { 
           method: 'POST', 
           body: uploadFormData 
       });
@@ -202,7 +202,7 @@ export default function Calculator() {
     payload.assessmentYear = assessmentYear;
 
     try {
-        const response = await fetch(`${API_BASE_URL}/calculate-tax`, {
+        const response = await fetch(`${API_BASE_URL}/api/calculate-tax`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(payload),
@@ -248,7 +248,7 @@ export default function Calculator() {
         payload.assessmentYear = assessmentYear;
 
         try {
-            const response = await fetch(`${API_BASE_URL}/calculate-tax`, {
+            const response = await fetch(`${API_BASE_URL}/api/calculate-tax`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(payload),
