@@ -229,7 +229,7 @@ app.post("/api/parse-income-document", upload.single('file'), async (req, res) =
 
         const genAI = new GoogleGenerativeAI(apiKey);
         // Make sure to use a model compatible with your file type (e.g., gemini-pro-vision for images/PDFs)
-        const model = genAI.getGenerativeModel({ model: "gemini-pro-vision" }); 
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" }); 
 
         const imagePart = {
              inlineData: {
