@@ -1,6 +1,12 @@
 const sqlite3 = require('sqlite3').verbose();
+const path = require('path'); // Import the path module
 
-const DBSOURCE = "db.sqlite";
+// Construct path relative to this file (db.js) to reach the project root's db.sqlite
+// __dirname gives the directory of db.js (i.e., /backend)
+// path.resolve(__dirname, '..', 'db.sqlite') goes up one level ('..') and targets db.sqlite
+const DBSOURCE = path.resolve(__dirname, '..', 'db.sqlite');
+
+console.log(`Using database file at: ${DBSOURCE}`); // Add log to confirm path
 
 let db = new sqlite3.Database(DBSOURCE, (err) => {
     if (err) {

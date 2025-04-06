@@ -10,7 +10,7 @@ if (!rootElement) {
   throw new Error("Root element with ID 'root' not found in the document.");
 }
 
-// Add 'dark' class to the root html element for dark mode
+// RE-ENABLE DARK MODE by default
 document.documentElement.classList.add('dark');
 
 // Create and render the React app

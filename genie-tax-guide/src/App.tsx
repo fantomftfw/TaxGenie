@@ -2,16 +2,13 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
-import Dashboard from "./pages/Dashboard";
 import Calculator from "./pages/Calculator";
-import Documents from "./pages/Documents";
 import NotFound from "./pages/NotFound";
-import Auth from "./pages/Auth";
-import Onboarding from "./pages/Onboarding";
-import { DashboardProvider } from "./contexts/DashboardContext";
-import AdminSettings from "./pages/AdminSettings";
+import AuthPage from "./pages/AuthPage";
+import LandingPage from "./pages/LandingPage";
+import { ThemeProvider } from "next-themes";
 
 // Create a new query client
 const queryClient = new QueryClient({
@@ -23,72 +20,58 @@ const queryClient = new QueryClient({
   },
 });
 
-// Component to wrap authenticated routes with necessary providers
-const AuthenticatedApp = ({ children }: { children: React.ReactNode }) => {
-  const { authState, profile } = useAuth();
-
+// AuthenticatedAppLayout might not be needed anymore if no shared layout for auth pages remains
+// We can remove it if Onboarding/Settings etc are also removed or made public
+// For now, let's keep it minimal but potentially unused
+const AuthenticatedAppLayout = () => {
+  const { authState } = useAuth();
   if (authState.isLoading) {
-    // Show loading state
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-pulse text-primary">Loading...</div>
-      </div>
-    );
+    return <div className="min-h-screen flex items-center justify-center bg-background"><div className="animate-pulse text-primary">Loading App...</div></div>;
   }
-
   if (!authState.user) {
-    return <Navigate to="/auth" replace />;
+    return <Navigate to="/login" state={{ from: window.location.pathname }} replace />;
   }
-
-  // If user hasn't completed onboarding, redirect to onboarding
-  // Check profile directly now as authState might not have updated immediately after signup->login
-  if (profile && !profile.onboarding_completed) {
-    return <Navigate to="/onboarding" replace />;
-  }
-
-  // Wrap authenticated content with DashboardProvider
-  return <DashboardProvider>{children}</DashboardProvider>;
+  // Remove onboarding check if onboarding page is removed/public
+  // Remove profile check if profile page is removed/public
+  return <Outlet />; // Just renders the child route
 };
 
-// Separate component for unauthenticated routes (optional, but clean)
-const UnauthenticatedApp = ({ children }: { children: React.ReactNode }) => {
+// Separate component for unauthenticated routes (Login/Signup)
+const UnauthenticatedLayout = () => {
   const { authState } = useAuth();
-  
+
   if (authState.isLoading) {
       return (
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="animate-pulse text-primary">Loading...</div>
+        <div className="min-h-screen flex items-center justify-center bg-background">
+          <div className="animate-pulse text-primary">Loading Auth...</div>
         </div>
       );
   }
 
+  // If user IS logged in, redirect them away from login/signup to the Landing Page
   if (authState.user) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/" replace />; // Redirect to Landing Page
   }
 
-  return <>{children}</>;
+  return <Outlet />;
 }
 
 // Define routes
 const AppRoutes = () => {
   return (
     <Routes>
-      {/* Authenticated routes wrapped in AuthenticatedApp */}
-      <Route path="/" element={<AuthenticatedApp><Dashboard /></AuthenticatedApp>} />
-      <Route path="/calculator" element={<AuthenticatedApp><Calculator /></AuthenticatedApp>} />
-      <Route path="/documents" element={<AuthenticatedApp><Documents /></AuthenticatedApp>} />
-      
-      {/* Onboarding route - used by redirect logic */}
-      <Route path="/onboarding" element={<Onboarding />} /> 
+      {/* Public Routes */}
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/calculator" element={<Calculator />} />
+      <Route path="/about" element={<div>About Us Page (Placeholder)</div>} />
 
-      {/* ADDED: Test route for onboarding - Bypasses completion check */}
-      <Route path="/onboarding-test" element={<Onboarding />} />
+      {/* Unauthenticated Routes (Login/Signup) */}
+      <Route element={<UnauthenticatedLayout />}>
+        <Route path="/login" element={<AuthPage mode="login" />} />
+        <Route path="/signup" element={<AuthPage mode="signup" />} />
+      </Route>
 
-      {/* Unauthenticated routes wrapped in UnauthenticatedApp*/}
-      <Route path="/auth" element={<UnauthenticatedApp><Auth /></UnauthenticatedApp>} />
-
-      {/* Admin route (TODO: Add proper admin protection) */}
-      <Route path="/admin/settings" element={<AdminSettings />} />
+      {/* Removed all /app routes */}
 
       {/* Catch-all route */}
       <Route path="*" element={<NotFound />} />
@@ -97,18 +80,19 @@ const AppRoutes = () => {
 };
 
 const App = () => {
-  console.log("App rendering");
-  
+  console.log("App rendering - Revised Routes");
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <TooltipProvider>
-          <BrowserRouter>
-            <AppRoutes />
-          </BrowserRouter>
-          <Toaster />
-          <Sonner />
-        </TooltipProvider>
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
+          <TooltipProvider>
+            <BrowserRouter>
+              <AppRoutes />
+            </BrowserRouter>
+            <Toaster />
+            <Sonner position="bottom-right" />
+          </TooltipProvider>
+        </ThemeProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

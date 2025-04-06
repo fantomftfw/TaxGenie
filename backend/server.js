@@ -1,3 +1,5 @@
+require('dotenv').config(); // Load environment variables from .env file
+
 const express = require("express");
 const cors = require("cors");
 const db = require("./db.js"); // Import database connection
@@ -32,7 +34,8 @@ const upload = multer({
 // Configure CORS
 const allowedOrigins = [
   'http://localhost:8080', // Your Vite dev server
-  'https://rad-llama-90904c.netlify.app' // Ensure this matches EXACTLY
+  'https://rad-llama-90904c.netlify.app', // Example - Keep if needed?
+  'YOUR_NETLIFY_SITE_URL' // <-- Replace this placeholder
 ];
 
 const corsOptions = {
@@ -51,11 +54,20 @@ const corsOptions = {
     }    
     // Allow specified origins in production
     // Use trimmedOrigin for the check
-    if (allowedOrigins.indexOf(trimmedOrigin) !== -1) {
-      callback(null, true)
+    const isAllowed = allowedOrigins.some(allowed => 
+        trimmedOrigin === allowed || 
+        // Add wildcard support for Netlify deploy previews (optional)
+        (allowed.includes('YOUR_NETLIFY_SITE_URL') && 
+         trimmedOrigin && 
+         trimmedOrigin.endsWith('.netlify.app') && 
+         trimmedOrigin.startsWith('https://deploy-preview-'))
+    );
+
+    if (!trimmedOrigin || isAllowed) {
+        callback(null, true)
     } else {
-      console.error(`CORS Error: Origin "${trimmedOrigin}" not in allowed list:`, allowedOrigins); // Log the error case too
-      callback(new Error('Not allowed by CORS'))
+        console.error(`CORS Error: Origin "${trimmedOrigin}" not in allowed list:`, allowedOrigins);
+        callback(new Error('Not allowed by CORS'))
     }
   },
   optionsSuccessStatus: 200 // some legacy browsers (IE11, various SmartTVs) choke on 204
@@ -77,27 +89,6 @@ const authenticateToken = (req, res, next) => {
     if (err) return res.sendStatus(403); // Invalid token
     req.user = user; // Add user payload to request object
     next();
-  });
-};
-
-// --- Admin Authorization Middleware ---
-const authorizeAdmin = (req, res, next) => {
-  const userId = req.user.id; // Assumes authenticateToken ran first
-
-  // MVP Workaround: Check email instead of a non-existent 'role' column
-  const sql = "SELECT email FROM users WHERE id = ?"; 
-  db.get(sql, [userId], (err, user) => {
-    if (err) {
-        console.error("DB Select error (admin check):", err);
-        return res.status(500).json({ "error": "Error checking user permission" }); // Generic error
-    }
-    // Check if user exists and email matches the hardcoded admin email
-    if (user && user.email === 'samefantom@gmail.com') {
-        next(); // User is admin, proceed to the route handler
-    } else {
-        console.warn(`Admin access denied for user ID: ${userId}, Email: ${user?.email}`);
-        res.status(403).json({ "error": "Forbidden: Requires admin privileges" }); // Not an admin
-    }
   });
 };
 
@@ -228,56 +219,239 @@ app.patch("/api/user/profile", authenticateToken, (req, res) => {
     });
 });
 
-// --- Tax Calculation Route (Unprotected for now) ---
-// TODO: Decide if this needs authentication. Probably yes.
+// --- Helper Functions for Tax Calculation (FY 2024-25 / AY 2025-26) ---
+
+function calculateHraExemption(basic, hraReceived, rentPaid, isMetroCity) {
+    if (!hraReceived || hraReceived <= 0 || !rentPaid || rentPaid <= 0 || !basic || basic <= 0) {
+        return 0;
+    }
+    // 1. Actual HRA Received
+    const actualHra = hraReceived;
+    // 2. Rent Paid minus 10% of Basic Salary
+    const rentMinus10PercentBasic = Math.max(0, rentPaid - (0.10 * basic));
+    // 3. 50% of Basic Salary (Metro) or 40% (Non-Metro)
+    const percentageOfBasic = isMetroCity ? (0.50 * basic) : (0.40 * basic);
+
+    const exemption = Math.min(actualHra, rentMinus10PercentBasic, percentageOfBasic);
+    return Math.max(0, exemption); // Ensure exemption is not negative
+}
+
+// Calculates tax based on taxable income and slab rates
+function calculateTaxSlab(taxableIncome, slabs) {
+    let tax = 0;
+    let remainingIncome = taxableIncome;
+
+    for (let i = slabs.length - 1; i >= 0; i--) {
+        const slab = slabs[i];
+        if (remainingIncome > slab.limit) {
+            tax += (remainingIncome - slab.limit) * slab.rate;
+            remainingIncome = slab.limit;
+        }
+    }
+    return tax;
+}
+
+const cessRate = 0.04;
+
+// --- Helper Function to Get Tax Rules by AY --- 
+function getTaxRules(assessmentYear) {
+    // Default to latest AY if invalid/missing
+    const ay = assessmentYear === "2024-25" ? "2024-25" : "2025-26"; 
+    
+    console.log(`Using tax rules for Assessment Year: ${ay}`);
+
+    if (ay === "2024-25") { // Rules for FY 2023-24
+        return {
+            oldRegimeSlabs: [
+                { limit: 0, rate: 0 },
+                { limit: 250000, rate: 0.05 },
+                { limit: 500000, rate: 0.20 },
+                { limit: 1000000, rate: 0.30 },
+            ],
+            newRegimeSlabs: [ // Default New Regime slabs for FY 23-24
+                { limit: 0, rate: 0 },
+                { limit: 300000, rate: 0.05 },
+                { limit: 600000, rate: 0.10 },
+                { limit: 900000, rate: 0.15 },
+                { limit: 1200000, rate: 0.20 },
+                { limit: 1500000, rate: 0.30 },
+            ],
+            oldRegimeRebateLimit: 500000,
+            newRegimeRebateLimit: 700000,
+            cessRate: 0.04,
+            standardDeductionOld: 50000,
+            standardDeductionNew: 50000, // Applicable from FY 23-24
+            // Include other year-specific deduction limits if they changed significantly
+        };
+    } else { // Rules for AY 2025-26 (FY 2024-25) - Assuming same as previous for now
+         // IMPORTANT: UPDATE THESE VALUES BASED ON OFFICIAL FY 2024-25 RULES
+        return {
+            oldRegimeSlabs: [
+                { limit: 0, rate: 0 },
+                { limit: 250000, rate: 0.05 }, // Verify
+                { limit: 500000, rate: 0.20 }, // Verify
+                { limit: 1000000, rate: 0.30 }, // Verify
+            ],
+            newRegimeSlabs: [ 
+                { limit: 0, rate: 0 },
+                { limit: 300000, rate: 0.05 },   // Verify
+                { limit: 600000, rate: 0.10 },  // Verify
+                { limit: 900000, rate: 0.15 }, // Verify
+                { limit: 1200000, rate: 0.20 }, // Verify
+                { limit: 1500000, rate: 0.30 }, // Verify
+            ],
+            oldRegimeRebateLimit: 500000, // Verify
+            newRegimeRebateLimit: 700000, // Verify
+            cessRate: 0.04,
+            standardDeductionOld: 50000,
+            standardDeductionNew: 50000,
+        };
+    }
+}
+
+// --- Old Regime Calculation (Uses rules from getTaxRules) ---
+function calculateOldRegimeTax(grossIncome, deductions, rules) {
+    const standardDeduction = rules.standardDeductionOld;
+    const taxableIncome = Math.max(0, grossIncome - standardDeduction - deductions.totalDeductions);
+    const oldRegimeSlabs = rules.oldRegimeSlabs;
+    let tax = calculateTaxSlab(taxableIncome, oldRegimeSlabs);
+    
+    if (taxableIncome <= rules.oldRegimeRebateLimit) {
+       tax = 0;
+    }
+    
+    const totalTax = tax > 0 ? tax * (1 + rules.cessRate) : 0;
+    return { taxableIncomeOld: taxableIncome, taxPayableOld: Math.round(totalTax) };
+}
+
+// --- New Regime Calculation (Uses rules from getTaxRules) ---
+function calculateNewRegimeTax(grossIncome, deductions, rules) {
+    const standardDeduction = rules.standardDeductionNew;
+    const taxableIncome = Math.max(0, grossIncome - standardDeduction);
+    const newRegimeSlabs = rules.newRegimeSlabs;
+    let tax = calculateTaxSlab(taxableIncome, newRegimeSlabs);
+
+    if (taxableIncome <= rules.newRegimeRebateLimit) {
+       tax = 0;
+    }
+
+    const totalTax = tax > 0 ? tax * (1 + rules.cessRate) : 0;
+    return { taxableIncomeNew: taxableIncome, taxPayableNew: Math.round(totalTax) };
+}
+
+// --- Tax Calculation Route (Updated to use getTaxRules) ---
 app.post("/api/calculate-tax", (req, res) => {
-  const inputData = req.body;
-  console.log("Received data for tax calculation:", inputData);
+  try {
+      const input = req.body;
+      const assessmentYear = input.assessmentYear || "2025-26"; // Get AY from payload
+      const rules = getTaxRules(assessmentYear); // Get rules for the selected AY
+      
+      console.log(`Calculating tax for AY: ${assessmentYear}`);
 
-  // --- Placeholder Logic --- 
-  // TODO: Replace this with actual Indian tax calculation logic 
-  // based on inputData (salary components, deductions, regime choice etc.)
-  const grossTotalIncome = Number(inputData.basic || 0) + Number(inputData.hra || 0) + Number(inputData.special || 0) + Number(inputData.otherIncome || 0); // Example calculation
-  // Sum up relevant 80C deductions (ensure they are numbers)
-  const deduction80C = [
-      inputData.deduction80C_epf,
-      inputData.deduction80C_elss,
-      inputData.deduction80C_insurance,
-      inputData.deduction80C_ppf,
-      inputData.deduction80C_tuition,
-      inputData.deduction80C_housingLoanPrincipal
-  ].reduce((sum, val) => sum + Number(val || 0), 0);
-  // TODO: Add proper calculation for other deductions (80D, 80CCD1B, 80TTA, HRA Exemption, Home Loan Interest)
-  const totalDeductions = Math.min(deduction80C, 150000) + Number(inputData.deduction80D_selfFamily || 0) + Number(inputData.deduction80D_parents || 0) + Number(inputData.deduction80CCD1B_nps || 0) + Number(inputData.deduction80TTA_savingsInterest || 0) + Number(inputData.homeLoanInterest || 0); // Highly simplified
+      // --- Parse Inputs (Keep as is) ---
+      // ... basic, hra, special, etc. ...
+      const basic = Number(input.basic || 0);
+      const hraReceived = Number(input.hra || 0);
+      const special = Number(input.special || 0);
+      const lta = Number(input.lta || 0);
+      const otherIncome = Number(input.otherIncome || 0);
+      const employeePf = Number(input.epfContribution || 0);
+      const professionalTax = Number(input.professionalTax || 0);
+      const rentPaid = Number(input.rentPaid || 0);
+      const isMetroCity = Boolean(input.isMetroCity || false);
+      const homeLoanInterest = Number(input.homeLoanInterest || 0); // Sec 24b
+      const savingsInterest = Number(input.deduction80TTA_savingsInterest || 0); // Sec 80TTA
+      const npsContribution80CCD1B = Number(input.deduction80CCD1B_nps || 0); // Sec 80CCD(1B)
+      const medInsuranceSelf = Number(input.deduction80D_selfFamily || 0); // Sec 80D Self
+      const medInsuranceParents = Number(input.deduction80D_parents || 0); // Sec 80D Parents
+      
+      // Calculate Gross Salary (before exemptions like HRA)
+      // Note: LTA exemption is NOT calculated here as it requires proof of travel.
+      const grossSalary = basic + hraReceived + special + lta;
+      const grossTotalIncome = grossSalary + otherIncome;
 
-  const taxableIncome = Math.max(0, grossTotalIncome - totalDeductions - 50000); // Example with Standard Deduction (Old Regime style)
+      // --- Calculate Deductions for Old Regime (Keep as is, but WARN about 80D) ---
+      // ... hraExemption, 80C, 80D (simplified), 80CCD1B, 80TTA, 24b ...
+      // WARNING: Simplified 80D limits used. Rules might differ slightly per AY.
+      const hraExemption = calculateHraExemption(basic, hraReceived, rentPaid, isMetroCity);
+      
+      const deduction80C_items = [
+          employeePf, 
+          Number(input.deduction80C_ppf || 0), 
+          Number(input.deduction80C_elss || 0), 
+          Number(input.deduction80C_insurance || 0), 
+          Number(input.deduction80C_housingLoanPrincipal || 0),
+          Number(input.deduction80C_tuition || 0)
+      ];
+      const total80C = deduction80C_items.reduce((sum, val) => sum + val, 0);
+      const capped80C = Math.min(total80C, 150000); // Cap 80C at 1.5L
+      
+      // Cap 80D, 80CCD1B, 80TTA
+      // WARNING: Simplified 80D limits used (25k self/family, 50k parents). Does not account for senior citizens.
+      const capped80D = Math.min(medInsuranceSelf, 25000) + Math.min(medInsuranceParents, 50000);
+      const capped80CCD1B = Math.min(npsContribution80CCD1B, 50000);
+      const capped80TTA = Math.min(savingsInterest, 10000);
+      const capped24b = Math.min(homeLoanInterest, 200000); // Cap Sec 24b interest
 
-  // Very basic placeholder tax calculation (DO NOT USE FOR REAL TAXES)
-  let taxPayable = 0;
-  if (taxableIncome > 250000) { // Simplified old regime slab
-      taxPayable = (taxableIncome - 250000) * 0.05; 
+      // Total Deductions Applicable under Old Regime (excluding Standard Deduction)
+      const oldRegimeDeductions = {
+          hraExemption: hraExemption,
+          capped80C: capped80C,
+          capped80D: capped80D,
+          capped80CCD1B: capped80CCD1B,
+          capped80TTA: capped80TTA,
+          capped24b: capped24b,
+          professionalTax: professionalTax, // Professional Tax is a deduction from Salary Income
+          // Summing them up (PT is deducted before GTI, others after)
+          totalDeductions: hraExemption + capped80C + capped80D + capped80CCD1B + capped80TTA + capped24b
+      };
+      
+      // Adjust for PT (Keep as is)
+      const incomeAfterPt = grossTotalIncome - professionalTax;
+
+      // --- Calculate Tax for Both Regimes using selected rules ---
+      const oldResult = calculateOldRegimeTax(incomeAfterPt, oldRegimeDeductions, rules);
+      // New regime deductions might be different in older AYs, but pass empty for now
+      const newResult = calculateNewRegimeTax(incomeAfterPt, {}, rules);
+
+      // --- Prepare Final Response (Keep as is) --- 
+      const taxPayableOld = oldResult.taxPayableOld;
+      const taxPayableNew = newResult.taxPayableNew;
+      const taxSavingsNewVsOld = taxPayableOld - taxPayableNew; // Positive if new saves tax
+      let recommendedRegime = 'either';
+      if (taxPayableNew < taxPayableOld) {
+          recommendedRegime = 'new';
+      } else if (taxPayableOld < taxPayableNew) {
+          recommendedRegime = 'old';
+      }
+
+      const finalResult = {
+          grossTotalIncome: Math.round(grossTotalIncome),
+          netTaxableIncomeOld: Math.round(oldResult.taxableIncomeOld),
+          netTaxableIncomeNew: Math.round(newResult.taxableIncomeNew),
+          taxPayableOld: taxPayableOld,
+          taxPayableNew: taxPayableNew,
+          recommendedRegime: recommendedRegime,
+          taxSavingsNewVsOld: Math.round(taxSavingsNewVsOld),
+          assessmentYearUsed: assessmentYear // Optionally return the AY used
+      };
+
+      console.log("Final Calculation Result:", finalResult);
+      res.json(finalResult);
+
+  } catch (error) {
+      console.error("Error during tax calculation:", error);
+      res.status(500).json({ error: "Failed to calculate tax. An internal error occurred." });
   }
-  // --- End Placeholder Logic ---
-
-  // Send back calculated details (or placeholder data)
-  res.json({ 
-    message: "Tax calculation request received.", 
-    receivedData: inputData, 
-    // Replace with actual calculated values
-    calculatedTaxDetails: {
-        grossTotalIncome: grossTotalIncome,
-        totalDeductions: totalDeductions,
-        taxableIncome: taxableIncome,
-        taxPayable: taxPayable, // Replace with actual calculated tax
-        // TODO: Add comparison for old vs new regime here eventually
-    } 
-  });
 });
 
 // --- Helper to get API Key from DB --- 
-async function getGeminiApiKey() {
+// Modify to handle missing userId (fetch global key)
+async function getGeminiApiKey(userId) { // userId might be undefined now
     return new Promise((resolve, reject) => {
-        const sql = "SELECT value FROM settings WHERE key = ?";
+        // If userId is provided (e.g., from other authenticated routes), potentially fetch user-specific key (future enhancement?)
+        // For now, always fetch the global key
+        const sql = "SELECT value FROM settings WHERE key = ?"; 
         db.get(sql, ['geminiApiKey'], (err, row) => {
             if (err) {
                 console.error("Error fetching API key:", err);
@@ -285,42 +459,25 @@ async function getGeminiApiKey() {
             } else if (row && row.value) {
                 resolve(row.value);
             } else {
+                 console.warn("Gemini API Key not found in settings table.");
                 resolve(null); // Key not found or not set
             }
         });
     });
 }
 
-// --- Endpoint to GET User Documents ---
-app.get("/api/documents", authenticateToken, (req, res) => {
-    const userId = req.user.id;
-    console.log(`Fetching documents for user ID: ${userId}`);
-
-    const sql = `
-        SELECT id, user_id, original_filename, upload_timestamp, identified_type, parsed_data_json 
-        FROM user_documents 
-        WHERE user_id = ? 
-        ORDER BY upload_timestamp DESC
-    `;
-
-    db.all(sql, [userId], (err, rows) => {
-        if (err) {
-            console.error("DB Error fetching documents:", err);
-            return res.status(500).json({ error: "Failed to retrieve documents." });
+// --- Helper to extract JSON from string (fallback) ---
+function extractJsonFromString(str) {
+    try {
+        const jsonMatch = str.match(/\{.*\}/s);
+        if (jsonMatch && jsonMatch[0]) {
+            return JSON.parse(jsonMatch[0]);
         }
-        // Attempt to parse the JSON data for each row
-        const documents = rows.map(row => {
-            try {
-                return { ...row, parsed_data: JSON.parse(row.parsed_data_json || 'null') };
-            } catch (parseError) {
-                console.error(`Failed to parse JSON for doc ID ${row.id}:`, parseError);
-                return { ...row, parsed_data: null, parseError: 'Failed to parse stored JSON' };
-            }
-        });
-        
-        res.json({ documents });
-    });
-});
+    } catch (e) {
+        console.error("Fallback JSON extraction failed:", e);
+    }
+    return null;
+}
 
 // --- Document Upload Endpoint (Updated for Gemini) ---
 app.post("/api/documents/upload", authenticateToken, upload.single('document'), async (req, res) => {
@@ -332,24 +489,26 @@ app.post("/api/documents/upload", authenticateToken, upload.single('document'), 
         return res.status(400).json({ error: "No file uploaded or file type not allowed." });
     }
 
-    // TEMPORARY: Hardcode API Key - REMOVE FOR PRODUCTION / USE ENV VAR
+    // Remove TEMPORARY Hardcode
+    /* 
     const apiKey = "AIzaSyB2TUPrXR8qQNcLselSNq8twBklnCU40a4"; 
-    if (!apiKey) { // Keep basic check in case hardcoded value is removed
+    if (!apiKey) { 
          console.error("CRITICAL: Gemini API Key is not set!");
          return res.status(500).json({ error: "API Key configuration error." });
     }
-    /* 
-    // Original code to fetch from DB - commented out
+    */
+   
+    // Restore original code to fetch from DB
     let apiKey;
     try {
         apiKey = await getGeminiApiKey();
         if (!apiKey) {
-            return res.status(500).json({ error: "Gemini API Key not configured in admin settings." });
+            return res.status(500).json({ error: "Gemini API Key not configured. Please set it via Admin settings." });
         }
     } catch (dbError) {
         return res.status(500).json({ error: "Failed to retrieve API key from database." });
     }
-    */
+   
 
     try {
         // Initialize Google AI Client
@@ -598,65 +757,6 @@ function calculateTaxLiability(processedData) {
     };
 }
 
-// --- Admin Routes ---
-// TODO: Secure properly
-app.get("/api/admin/settings", authenticateToken, authorizeAdmin, (req, res) => {
-  console.log("Accessing protected admin settings...");
-  // Fetch sensitive settings only accessible to admins
-  const sql = "SELECT key, value FROM settings";
-  db.all(sql, [], (err, rows) => {
-      if (err) {
-          console.error("Error fetching settings:", err);
-          return res.status(500).json({ error: "Failed to fetch settings" });
-      }
-      // Convert array of {key, value} to a single object {key1: value1, key2: value2}
-      const settings = rows.reduce((acc, row) => {
-          acc[row.key] = row.value;
-          return acc;
-      }, {});
-      res.json({ settings });
-  });
-});
-
-app.post("/api/admin/settings", authenticateToken, authorizeAdmin, (req, res) => {
-    console.log("Updating protected admin settings...");
-    const settingsToUpdate = req.body.settings; // Expecting { geminiApiKey: '...', otherKey: '...' }
-
-    if (typeof settingsToUpdate !== 'object' || settingsToUpdate === null) {
-        return res.status(400).json({ error: "Invalid settings format. Expected an object." });
-    }
-
-    // Use transactions for multiple updates
-    db.serialize(() => {
-        db.run("BEGIN TRANSACTION");
-        let hadError = false;
-        const sql = "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)";
-        
-        Object.entries(settingsToUpdate).forEach(([key, value]) => {
-            // Basic validation or sanitization could go here
-            db.run(sql, [key, value], function(err) {
-                if (err) {
-                    console.error(`Error updating setting ${key}:`, err);
-                    hadError = true;
-                }
-            });
-        });
-
-        if (hadError) {
-            db.run("ROLLBACK");
-            return res.status(500).json({ error: "Failed to update some settings." });
-        }
-        
-        db.run("COMMIT", (err) => {
-            if (err) {
-                console.error("Commit error:", err);
-                return res.status(500).json({ error: "Failed to commit settings update." });
-            }
-            res.json({ message: "Settings updated successfully." });
-        });
-    });
-});
-
 // --- Endpoint to GET Dashboard Summary (Latest Doc Data) ---
 app.get("/api/dashboard-summary", authenticateToken, (req, res) => {
     const userId = req.user.id;
@@ -703,9 +803,100 @@ app.get("/api/dashboard-summary", authenticateToken, (req, res) => {
     });
 });
 
-// --- Endpoint to DELETE User Document ---
-app.delete("/api/documents/:id", authenticateToken, async (req, res) => {
-   // ... route logic ...
+// --- Route for Parsing Uploaded Income Document ---
+app.post("/api/parse-income-document", upload.single('file'), async (req, res) => {
+    console.log("--- Received request at /api/parse-income-document (UNAUTHENTICATED) ---");
+
+    if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded." });
+    }
+
+    if (req.file.mimetype !== 'application/pdf') {
+         return res.status(400).json({ error: "Only PDF files are allowed." });
+    }
+
+    console.log(`Received file: ${req.file.originalname}, Size: ${req.file.size} bytes`);
+
+    try {
+        // Fetch global API key since user is not authenticated
+        const apiKey = await getGeminiApiKey(); // Remove req.user.id argument
+        if (!apiKey) {
+            // Use a more general error message
+            return res.status(500).json({ error: "API key not configured on server." });
+        }
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); // Or your preferred model
+
+        // Convert buffer to base64 for Gemini API
+        const base64pdf = req.file.buffer.toString('base64');
+
+        const prompt = `
+            Analyze the following PDF document (likely an Indian Form 16 Part B or a Salary Slip).
+            Extract the following financial figures. Determine if the figures represent MONTHLY or ANNUAL amounts based on the document type and context (Form 16 is usually annual, payslips are usually monthly). 
+            If figures are monthly, multiply them by 12 to get the ANNUALIZED value. Return only the ANNUALIZED values.
+            
+            Required ANNUAL figures:
+            1.  Basic Salary (Annual)
+            2.  House Rent Allowance (HRA) received (Annual)
+            3.  Special Allowance (Annual)
+            4.  Leave Travel Allowance (LTA) received (Annual)
+            5.  Employee's Provident Fund (EPF) contribution (Annual)
+            6.  Professional Tax deducted (Annual)
+
+            If a value is explicitly stated as zero, use 0. If a value is not found or not applicable, omit the key from the JSON.
+            Return the result ONLY as a valid JSON object with keys: basic, hra, special, lta, epfContribution, professionalTax.
+            Ensure values are numbers (no commas or currency symbols).
+        `;
+
+        const result = await model.generateContent([
+            prompt,
+            {
+                inlineData: {
+                    mimeType: "application/pdf",
+                    data: base64pdf,
+                },
+            },
+        ]);
+
+        const response = await result.response;
+        const text = response.text();
+
+        console.log("Gemini Raw Response:", text);
+
+        // Attempt to parse the JSON response from Gemini
+        let parsedJson = {};
+        try {
+             // Clean the response text (remove markdown backticks and potentially leading/trailing text)
+             const cleanedText = text.replace(/^```json\n|```$/g, '').trim();
+            parsedJson = JSON.parse(cleanedText);
+            console.log("Parsed JSON from Gemini:", parsedJson);
+        } catch (parseError) {
+            console.error("Failed to parse JSON from Gemini response:", parseError);
+            // Try a looser extraction if strict JSON fails
+            const extracted = extractJsonFromString(text); // Use helper function
+            if (extracted) {
+                console.log("Loosely Extracted JSON:", extracted);
+                parsedJson = extracted;
+            } else {
+                 throw new Error("Could not extract valid JSON data from the document analysis.");
+            }
+        }
+
+        // Validate expected fields (optional but recommended)
+        const expectedKeys = ['basic', 'hra', 'special', 'lta', 'epfContribution', 'professionalTax'];
+        const validatedData = {};
+        for (const key in parsedJson) {
+            if (expectedKeys.includes(key) && typeof parsedJson[key] === 'number') {
+                 validatedData[key] = parsedJson[key];
+            }
+        }
+        console.log("Validated & Returning Data:", validatedData);
+        res.json(validatedData); // Send back the validated extracted data
+
+    } catch (error) {
+        console.error("Error during PDF parsing or Gemini call:", error);
+        res.status(500).json({ error: error.message || "Failed to process document." });
+    }
 });
 
 // --- Server Start ---
