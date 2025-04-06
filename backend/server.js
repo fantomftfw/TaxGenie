@@ -299,18 +299,25 @@ app.post("/api/parse-income-document", upload.single('file'), async (req, res) =
 
 // --- Helper Functions for Tax Calculation (FY 2024-25 / AY 2025-26) ---
 
-function calculateHraExemption(basic, hraReceived, rentPaid, isMetroCity) {
-    if (!hraReceived || hraReceived <= 0 || !rentPaid || rentPaid <= 0 || !basic || basic <= 0) {
+// MODIFIED: Expects ANNUAL figures for basic, hraReceived, and rentPaid
+function calculateHraExemption(annualBasic, annualHraReceived, annualRentPaid, isMetroCity) {
+    // Ensure inputs are valid numbers and positive
+    annualBasic = Number(annualBasic || 0);
+    annualHraReceived = Number(annualHraReceived || 0);
+    annualRentPaid = Number(annualRentPaid || 0);
+
+    if (annualHraReceived <= 0 || annualRentPaid <= 0 || annualBasic <= 0) {
         return 0;
     }
-    // 1. Actual HRA Received
-    const actualHra = hraReceived;
-    // 2. Rent Paid minus 10% of Basic Salary
-    const rentMinus10PercentBasic = Math.max(0, rentPaid - (0.10 * basic));
-    // 3. 50% of Basic Salary (Metro) or 40% (Non-Metro)
-    const percentageOfBasic = isMetroCity ? (0.50 * basic) : (0.40 * basic);
+    // 1. Actual HRA Received (Annual)
+    const actualHraAnnual = annualHraReceived;
+    // 2. Rent Paid (Annual) minus 10% of Basic Salary (Annual)
+    const rentMinus10PercentAnnualBasic = Math.max(0, annualRentPaid - (0.10 * annualBasic));
+    // 3. 50% of Basic Salary (Annual) for Metro or 40% for Non-Metro
+    const percentageOfAnnualBasic = isMetroCity ? (0.50 * annualBasic) : (0.40 * annualBasic);
 
-    const exemption = Math.min(actualHra, rentMinus10PercentBasic, percentageOfBasic);
+    // Exemption is the minimum of the three
+    const exemption = Math.min(actualHraAnnual, rentMinus10PercentAnnualBasic, percentageOfAnnualBasic);
     return Math.max(0, exemption); // Ensure exemption is not negative
 }
 
@@ -423,76 +430,81 @@ app.post("/api/calculate-tax", (req, res) => {
       const input = req.body;
       const assessmentYear = input.assessmentYear || "2025-26"; // Get AY from payload
       const rules = getTaxRules(assessmentYear); // Get rules for the selected AY
-      
+
       console.log(`Calculating tax for AY: ${assessmentYear}`);
 
-      // --- Parse Inputs (Keep as is) ---
-      // ... basic, hra, special, etc. ...
-      const basic = Number(input.basic || 0);
-      const hraReceived = Number(input.hra || 0);
-      const special = Number(input.special || 0);
-      const lta = Number(input.lta || 0);
-      const otherIncome = Number(input.otherIncome || 0);
-      const employeePf = Number(input.epfContribution || 0);
-      const professionalTax = Number(input.professionalTax || 0);
-      const rentPaid = Number(input.rentPaid || 0);
-      const isMetroCity = Boolean(input.isMetroCity || false);
-      const homeLoanInterest = Number(input.homeLoanInterest || 0); // Sec 24b
-      const savingsInterest = Number(input.deduction80TTA_savingsInterest || 0); // Sec 80TTA
-      const npsContribution80CCD1B = Number(input.deduction80CCD1B_nps || 0); // Sec 80CCD(1B)
-      const medInsuranceSelf = Number(input.deduction80D_selfFamily || 0); // Sec 80D Self
-      const medInsuranceParents = Number(input.deduction80D_parents || 0); // Sec 80D Parents
-      
-      // Calculate Gross Salary (before exemptions like HRA)
-      // Note: LTA exemption is NOT calculated here as it requires proof of travel.
-      const grossSalary = basic + hraReceived + special + lta;
-      const grossTotalIncome = grossSalary + otherIncome;
+      // --- Parse Monthly Inputs ---
+      const basic_monthly = Number(input.basic || 0);
+      const hraReceived_monthly = Number(input.hra || 0);
+      const special_monthly = Number(input.special || 0);
+      const lta_monthly = Number(input.lta || 0);
+      const otherIncome_monthly = Number(input.otherIncome || 0); // Assume monthly unless specified otherwise
+      const employeePf_monthly = Number(input.epfContribution || 0);
+      const professionalTax_monthly = Number(input.professionalTax || 0);
 
-      // --- Calculate Deductions for Old Regime (Keep as is, but WARN about 80D) ---
-      // ... hraExemption, 80C, 80D (simplified), 80CCD1B, 80TTA, 24b ...
-      // WARNING: Simplified 80D limits used. Rules might differ slightly per AY.
-      const hraExemption = calculateHraExemption(basic, hraReceived, rentPaid, isMetroCity);
-      
-      const deduction80C_items = [
-          employeePf, 
-          Number(input.deduction80C_ppf || 0), 
-          Number(input.deduction80C_elss || 0), 
-          Number(input.deduction80C_insurance || 0), 
-          Number(input.deduction80C_housingLoanPrincipal || 0),
-          Number(input.deduction80C_tuition || 0)
+      // --- Parse Potentially Annual Inputs ---
+      const rentPaid_annual = Number(input.rentPaid || 0); // Assume annual rent
+      const isMetroCity = Boolean(input.isMetroCity || false);
+      const homeLoanInterest_annual = Number(input.homeLoanInterest || 0); // Sec 24b (Annual)
+      const savingsInterest_annual = Number(input.deduction80TTA_savingsInterest || 0); // Sec 80TTA (Annual)
+      const npsContribution80CCD1B_annual = Number(input.deduction80CCD1B_nps || 0); // Sec 80CCD(1B) (Annual)
+      const medInsuranceSelf_annual = Number(input.deduction80D_selfFamily || 0); // Sec 80D Self (Annual)
+      const medInsuranceParents_annual = Number(input.deduction80D_parents || 0); // Sec 80D Parents (Annual)
+      const ppf_annual = Number(input.deduction80C_ppf || 0); // Assume annual
+      const elss_annual = Number(input.deduction80C_elss || 0); // Assume annual
+      const insurance_annual = Number(input.deduction80C_insurance || 0); // Assume annual
+      const housingLoanPrincipal_annual = Number(input.deduction80C_housingLoanPrincipal || 0); // Assume annual
+      const tuition_annual = Number(input.deduction80C_tuition || 0); // Assume annual
+
+      // --- Calculate Annual Figures ---
+      const annualBasic = basic_monthly * 12;
+      const annualHraReceived = hraReceived_monthly * 12;
+      const annualSpecial = special_monthly * 12;
+      const annualLta = lta_monthly * 12; // LTA exemption calculation is separate/manual, include in gross for now
+      const annualOtherIncome = otherIncome_monthly * 12;
+      const annualEmployeePf = employeePf_monthly * 12;
+      const annualProfessionalTax = professionalTax_monthly * 12;
+
+      const annualGrossSalary = annualBasic + annualHraReceived + annualSpecial + annualLta;
+      const annualGrossTotalIncome = annualGrossSalary + annualOtherIncome;
+
+
+      // --- Calculate Deductions Applicable under Old Regime (using Annual figures) ---
+      const annualHraExemption = calculateHraExemption(annualBasic, annualHraReceived, rentPaid_annual, isMetroCity);
+
+      const deduction80C_items_annual = [
+          annualEmployeePf, // Use annualized PF
+          ppf_annual,
+          elss_annual,
+          insurance_annual,
+          housingLoanPrincipal_annual,
+          tuition_annual
       ];
-      const total80C = deduction80C_items.reduce((sum, val) => sum + val, 0);
-      const capped80C = Math.min(total80C, 150000); // Cap 80C at 1.5L
-      
-      // Cap 80D, 80CCD1B, 80TTA
+      const total80C_annual = deduction80C_items_annual.reduce((sum, val) => sum + Number(val || 0), 0); // Ensure values are numbers
+      const capped80C_annual = Math.min(total80C_annual, 150000); // Cap 80C at 1.5L
+
+      // Cap 80D, 80CCD1B, 80TTA, 24b (using annual inputs)
       // WARNING: Simplified 80D limits used (25k self/family, 50k parents). Does not account for senior citizens.
-      const capped80D = Math.min(medInsuranceSelf, 25000) + Math.min(medInsuranceParents, 50000);
-      const capped80CCD1B = Math.min(npsContribution80CCD1B, 50000);
-      const capped80TTA = Math.min(savingsInterest, 10000);
-      const capped24b = Math.min(homeLoanInterest, 200000); // Cap Sec 24b interest
+      const capped80D_annual = Math.min(medInsuranceSelf_annual, 25000) + Math.min(medInsuranceParents_annual, 50000);
+      const capped80CCD1B_annual = Math.min(npsContribution80CCD1B_annual, 50000);
+      const capped80TTA_annual = Math.min(savingsInterest_annual, 10000); // Only savings interest, not FD etc.
+      const capped24b_annual = Math.min(homeLoanInterest_annual, 200000); // Cap Sec 24b interest
 
       // Total Deductions Applicable under Old Regime (excluding Standard Deduction)
-      const oldRegimeDeductions = {
-          hraExemption: hraExemption,
-          capped80C: capped80C,
-          capped80D: capped80D,
-          capped80CCD1B: capped80CCD1B,
-          capped80TTA: capped80TTA,
-          capped24b: capped24b,
-          professionalTax: professionalTax, // Professional Tax is a deduction from Salary Income
-          // Summing them up (PT is deducted before GTI, others after)
-          totalDeductions: hraExemption + capped80C + capped80D + capped80CCD1B + capped80TTA + capped24b
-      };
-      
-      // Adjust for PT (Keep as is)
-      const incomeAfterPt = grossTotalIncome - professionalTax;
+      const oldRegimeTotalDeductionsAnnual = annualHraExemption + capped80C_annual + capped80D_annual + capped80CCD1B_annual + capped80TTA_annual + capped24b_annual;
 
-      // --- Calculate Tax for Both Regimes using selected rules ---
-      const oldResult = calculateOldRegimeTax(incomeAfterPt, oldRegimeDeductions, rules);
-      // New regime deductions might be different in older AYs, but pass empty for now
-      const newResult = calculateNewRegimeTax(incomeAfterPt, {}, rules);
 
-      // --- Prepare Final Response (Keep as is) --- 
+      // Adjust Annual Gross for Annual Professional Tax
+      // Professional Tax is deducted from Salary *before* calculating Gross Total Income,
+      // but for simplicity in passing to tax functions, we subtract it from annualGTI here.
+      // Note: Standard Deduction is handled INSIDE the regime calculation functions.
+      const annualIncomeAfterPt = annualGrossTotalIncome - annualProfessionalTax;
+
+      // --- Calculate Tax for Both Regimes using Annual figures and selected rules ---
+      const oldResult = calculateOldRegimeTax(annualIncomeAfterPt, { totalDeductions: oldRegimeTotalDeductionsAnnual }, rules);
+      const newResult = calculateNewRegimeTax(annualIncomeAfterPt, {}, rules); // New regime doesn't consider these deductions by default
+
+      // --- Prepare Final Response (Using Annual Figures) ---
       const taxPayableOld = oldResult.taxPayableOld;
       const taxPayableNew = newResult.taxPayableNew;
       const taxSavingsNewVsOld = taxPayableOld - taxPayableNew; // Positive if new saves tax
@@ -504,14 +516,27 @@ app.post("/api/calculate-tax", (req, res) => {
       }
 
       const finalResult = {
-          grossTotalIncome: Math.round(grossTotalIncome),
-          netTaxableIncomeOld: Math.round(oldResult.taxableIncomeOld),
-          netTaxableIncomeNew: Math.round(newResult.taxableIncomeNew),
+          // Return annual gross income
+          grossTotalIncome: Math.round(annualGrossTotalIncome),
+          netTaxableIncomeOld: Math.round(oldResult.taxableIncomeOld), // Already annual from calculation
+          netTaxableIncomeNew: Math.round(newResult.taxableIncomeNew), // Already annual from calculation
           taxPayableOld: taxPayableOld,
           taxPayableNew: taxPayableNew,
           recommendedRegime: recommendedRegime,
           taxSavingsNewVsOld: Math.round(taxSavingsNewVsOld),
-          assessmentYearUsed: assessmentYear // Optionally return the AY used
+          assessmentYearUsed: assessmentYear,
+          // Optionally include breakdown of deductions used
+          deductionsCalculated: {
+              annualHraExemption: Math.round(annualHraExemption),
+              capped80C: Math.round(capped80C_annual),
+              capped80D: Math.round(capped80D_annual),
+              capped80CCD1B: Math.round(capped80CCD1B_annual),
+              capped80TTA: Math.round(capped80TTA_annual),
+              capped24b: Math.round(capped24b_annual),
+              annualProfessionalTax: Math.round(annualProfessionalTax),
+              standardDeductionOld: rules.standardDeductionOld,
+              standardDeductionNew: rules.standardDeductionNew,
+          }
       };
 
       console.log("Final Calculation Result:", finalResult);
