@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/contexts/AuthContext";
 
 // Define API_BASE_URL using the same pattern
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
@@ -51,6 +52,7 @@ export default function Calculator() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const { authState } = useAuth();
 
   // Consolidated state for all form inputs
   const [formData, setFormData] = useState({
@@ -121,15 +123,28 @@ export default function Calculator() {
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    // Check for auth token BEFORE proceeding
+    const token = authState.token;
+    if (!token) {
+        setUploadError("Authentication error. Please log in again.");
+        // Maybe redirect to login or show a clearer login prompt
+        return;
+    }
+
     setIsUploading(true);
     setUploadError(null);
     setFileName(file.name);
     setParsedData(null);
     const uploadFormData = new FormData();
-    uploadFormData.append('file', file); // Ensure field name matches multer: 'file'
+    uploadFormData.append('file', file); 
     try {
       const response = await fetch(`${API_BASE_URL}/api/parse-income-document`, { 
           method: 'POST', 
+          headers: {
+              // Add the Authorization header with the JWT
+              'Authorization': `Bearer ${token}` 
+          },
           body: uploadFormData 
       });
 
