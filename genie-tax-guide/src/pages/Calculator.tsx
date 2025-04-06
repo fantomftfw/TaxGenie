@@ -124,13 +124,14 @@ export default function Calculator() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Check for auth token BEFORE proceeding
+    // REMOVE token check
+    /*
     const token = authState.token;
     if (!token) {
         setUploadError("Authentication error. Please log in again.");
-        // Maybe redirect to login or show a clearer login prompt
         return;
     }
+    */
 
     setIsUploading(true);
     setUploadError(null);
@@ -141,10 +142,12 @@ export default function Calculator() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/parse-income-document`, { 
           method: 'POST', 
+          // REMOVE headers section
+          /* 
           headers: {
-              // Add the Authorization header with the JWT
               'Authorization': `Bearer ${token}` 
           },
+          */
           body: uploadFormData 
       });
 

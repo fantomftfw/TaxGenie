@@ -203,10 +203,11 @@ app.patch("/api/user/profile", authenticateToken, (req, res) => {
 });
 
 // --- Document Parsing Route ---
-// Uses authenticateToken for security and upload.single('file') for file handling
-app.post("/api/parse-income-document", authenticateToken, upload.single('file'), async (req, res) => {
-    console.log("--- Received request at /api/parse-income-document ---");
-    const userId = req.user.id; // Get user ID from verified JWT
+// Remove authenticateToken middleware to allow unauthenticated uploads
+app.post("/api/parse-income-document", upload.single('file'), async (req, res) => {
+    console.log("--- Received request at /api/parse-income-document (UNAUTHENTICATED) ---");
+    // Remove user ID reference as user is not authenticated
+    // const userId = req.user.id; 
 
     if (!req.file) {
         return res.status(400).json({ error: "No file uploaded." });
