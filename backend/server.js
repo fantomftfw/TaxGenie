@@ -202,6 +202,100 @@ app.patch("/api/user/profile", authenticateToken, (req, res) => {
     });
 });
 
+// --- Document Parsing Route ---
+// Uses authenticateToken for security and upload.single('file') for file handling
+app.post("/api/parse-income-document", authenticateToken, upload.single('file'), async (req, res) => {
+    console.log("--- Received request at /api/parse-income-document ---");
+    const userId = req.user.id; // Get user ID from verified JWT
+
+    if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded." });
+    }
+
+    try {
+        // --- Gemini API Interaction Logic Goes Here --- 
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+             console.error("GEMINI_API_KEY not configured!");
+             return res.status(500).json({ error: "Server configuration error for document parsing." });
+        }
+        
+        // Check if file buffer exists
+        if (!req.file.buffer) {
+            console.error("File buffer is missing.");
+            return res.status(400).json({ error: "Uploaded file data is corrupted or missing." });
+        }
+
+        const genAI = new GoogleGenerativeAI(apiKey);
+        // Make sure to use a model compatible with your file type (e.g., gemini-pro-vision for images/PDFs)
+        const model = genAI.getGenerativeModel({ model: "gemini-pro-vision" }); 
+
+        const imagePart = {
+             inlineData: {
+                 data: req.file.buffer.toString("base64"),
+                 mimeType: req.file.mimetype // e.g., 'application/pdf'
+             },
+         };
+
+         const prompt = `
+            Parse the following document (${req.file.originalname}) and extract these specific fields in JSON format:
+            - basic (Basic Salary/Pay)
+            - hra (House Rent Allowance)
+            - special (Special Allowance)
+            - lta (Leave Travel Allowance)
+            - otherIncome (Any other income like interest, etc. if clearly stated)
+            - epfContribution (Employee's Provident Fund contribution)
+            - professionalTax (Professional Tax deducted)
+
+            If a field is not found, return it as null or omit it. Provide only the raw JSON object without any markdown formatting like \`\`\`json or \`\`\`
+            Example: {"basic": 600000, "hra": 300000, "epfContribution": 72000}
+        `;
+        
+        console.log(`Sending ${req.file.mimetype} to Gemini for parsing...`);
+        const result = await model.generateContent([prompt, imagePart]);
+        // Error handling for safety checks from Gemini
+        if (!result.response) {
+            console.error("Gemini API Error: No response generated.", result); // Log the full result for debugging
+            // Potentially inspect result.blockReason or result.finishReason if available
+            return res.status(500).json({ error: "Failed to get response from analysis service." });
+        }
+        
+        const response = result.response;
+        const text = response.text(); // Use text() method as per SDK
+        console.log("Received Gemini Response Text:", text);
+
+        let parsedData = {};
+        try {
+             // Attempt to directly parse, assuming Gemini follows the prompt correctly
+             parsedData = JSON.parse(text); 
+             console.log("Successfully Parsed JSON from Gemini:", parsedData);
+        } catch (parseError) {
+            console.error("Failed to parse JSON directly from Gemini response:", parseError);
+            console.error("Original Gemini Text was:", text); 
+            // Optionally try cleaning markdown (though prompt requests raw JSON)
+             const cleanedText = text.replace(/```json\\n?|\\n?```/g, "").trim();
+             try {
+                 parsedData = JSON.parse(cleanedText);
+                 console.log("Successfully Parsed JSON after cleaning:", parsedData);
+             } catch (cleanedParseError) {
+                 console.error("Failed to parse JSON even after cleaning:", cleanedParseError);
+                return res.status(500).json({ error: "Failed to understand document structure after analysis." });
+             }
+        }
+
+        // --- (Optional) Store results in database ---
+        // ... (consider adding DB storage logic here) ...
+
+        res.status(200).json(parsedData);
+
+    } catch (error) {
+        console.error("Error during document parsing pipeline:", error);
+        // Check for specific Gemini API errors if possible
+        // if (error.message.includes("API key not valid")) { ... }
+        res.status(500).json({ error: "Failed to process document.", details: error.message });
+    }
+});
+
 // --- Helper Functions for Tax Calculation (FY 2024-25 / AY 2025-26) ---
 
 function calculateHraExemption(basic, hraReceived, rentPaid, isMetroCity) {
@@ -784,102 +878,6 @@ app.get("/api/dashboard-summary", authenticateToken, (req, res) => {
             return res.status(500).json({ error: "Failed to process latest document data." });
         }
     });
-});
-
-// --- Route for Parsing Uploaded Income Document ---
-app.post("/api/parse-income-document", upload.single('file'), async (req, res) => {
-    console.log("--- Received request at /api/parse-income-document (UNAUTHENTICATED) ---");
-
-    if (!req.file) {
-        return res.status(400).json({ error: "No file uploaded." });
-    }
-
-    if (req.file.mimetype !== 'application/pdf') {
-         return res.status(400).json({ error: "Only PDF files are allowed." });
-    }
-
-    console.log(`Received file: ${req.file.originalname}, Size: ${req.file.size} bytes`);
-
-    try {
-        // Fetch global API key since user is not authenticated
-        const apiKey = await getGeminiApiKey(); // Remove req.user.id argument
-        if (!apiKey) {
-            // Use a more general error message
-            return res.status(500).json({ error: "API key not configured on server." });
-        }
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); // Or your preferred model
-
-        // Convert buffer to base64 for Gemini API
-        const base64pdf = req.file.buffer.toString('base64');
-
-        const prompt = `
-            Analyze the following PDF document (likely an Indian Form 16 Part B or a Salary Slip).
-            Extract the following financial figures. Determine if the figures represent MONTHLY or ANNUAL amounts based on the document type and context (Form 16 is usually annual, payslips are usually monthly). 
-            If figures are monthly, multiply them by 12 to get the ANNUALIZED value. Return only the ANNUALIZED values.
-            
-            Required ANNUAL figures:
-            1.  Basic Salary (Annual)
-            2.  House Rent Allowance (HRA) received (Annual)
-            3.  Special Allowance (Annual)
-            4.  Leave Travel Allowance (LTA) received (Annual)
-            5.  Employee's Provident Fund (EPF) contribution (Annual)
-            6.  Professional Tax deducted (Annual)
-
-            If a value is explicitly stated as zero, use 0. If a value is not found or not applicable, omit the key from the JSON.
-            Return the result ONLY as a valid JSON object with keys: basic, hra, special, lta, epfContribution, professionalTax.
-            Ensure values are numbers (no commas or currency symbols).
-        `;
-
-        const result = await model.generateContent([
-            prompt,
-            {
-                inlineData: {
-                    mimeType: "application/pdf",
-                    data: base64pdf,
-                },
-            },
-        ]);
-
-        const response = await result.response;
-        const text = response.text();
-
-        console.log("Gemini Raw Response:", text);
-
-        // Attempt to parse the JSON response from Gemini
-        let parsedJson = {};
-        try {
-             // Clean the response text (remove markdown backticks and potentially leading/trailing text)
-             const cleanedText = text.replace(/^```json\n|```$/g, '').trim();
-            parsedJson = JSON.parse(cleanedText);
-            console.log("Parsed JSON from Gemini:", parsedJson);
-        } catch (parseError) {
-            console.error("Failed to parse JSON from Gemini response:", parseError);
-            // Try a looser extraction if strict JSON fails
-            const extracted = extractJsonFromString(text); // Use helper function
-            if (extracted) {
-                console.log("Loosely Extracted JSON:", extracted);
-                parsedJson = extracted;
-            } else {
-                 throw new Error("Could not extract valid JSON data from the document analysis.");
-            }
-        }
-
-        // Validate expected fields (optional but recommended)
-        const expectedKeys = ['basic', 'hra', 'special', 'lta', 'epfContribution', 'professionalTax'];
-        const validatedData = {};
-        for (const key in parsedJson) {
-            if (expectedKeys.includes(key) && typeof parsedJson[key] === 'number') {
-                 validatedData[key] = parsedJson[key];
-            }
-        }
-        console.log("Validated & Returning Data:", validatedData);
-        res.json(validatedData); // Send back the validated extracted data
-
-    } catch (error) {
-        console.error("Error during PDF parsing or Gemini call:", error);
-        res.status(500).json({ error: error.message || "Failed to process document." });
-    }
 });
 
 // --- Server Start ---
